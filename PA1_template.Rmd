@@ -5,21 +5,214 @@ output:
     keep_md: true
 ---
 
+This assignment involves reading in and performing simple exploratory 
+analyses of 2 months of a single person's Fitbit data which 
+consists of estimated counts of steps taken in each 5 minute interval 
+during the 61 days (from October 1 to November 30 of 2012).  We look at 
+both total daily activity (summed up step counts), and the average 
+(across days) step counts for each 5 minute interval.  These can tell us 
+something about the person's activity patterns during the 2 month period.
 
 ## Loading and preprocessing the data
 
+First, we want to load the `dplyr` package so we can process the data 
+more easily:
 
+```{r results="hide", message=FALSE}
+library(dplyr)
+```
+
+The first step to actually processing the data is to unzip the 
+`activity.zip` file:
+
+```{r}
+unzip("activity.zip")
+```
+
+This extracts the `activity.csv` file. 
+We then want to read this file into a data frame, and I choose to reorder
+the columns so that the observation ID variables (`date` and `interval`) 
+are the first columns and the measurement variable (`steps`) is the last 
+variable.
+
+```{r}
+dfr <- read.csv("activity.csv")
+dfr <- select(dfr, date, interval, steps)
+head(dfr)
+tail(dfr)
+```
+
+One peculiarity to note about the interval data is that the indices are 
+non-uniformly defined.
+
+```{r}
+unique(dfr$interval)
+```
+
+Hours begin on indices 0, 100,.. 2300, but the interval indices within each 
+hour tell what the starting minute is (from 0-55) within the hour.
+
+Now there are a couple of data aggregations we want to perform for our 
+future analyses.  First, we want to pool by date and add up the steps for 
+each day.
+
+```{r}
+daySteps <- group_by(dfr, date) %>% summarize(totalSteps=sum(steps, na.rm=TRUE))
+head(data.frame(daySteps), 61)
+```
+
+We should note that the days with missing data end up having step counts 
+of 0.
+
+Next we want to pool by the 5 minute interval index and average across all 
+days, to give average step counts for each interval.
+
+```{r}
+intervalAveSteps <- group_by(dfr, interval) %>% summarize(aveSteps=mean(steps, na.rm=TRUE))
+head(data.frame(intervalAveSteps))
+tail(data.frame(intervalAveSteps))
+```
 
 ## What is mean total number of steps taken per day?
 
+We want to start looking at statistics for the daily step counts and make 
+a histogram of these to give us an idea how daily activity is distributed 
+among the days.
 
+```{r}
+totStepsMean <- mean(daySteps$totalSteps)
+totStepsMed <- median(daySteps$totalSteps)
+hist(daySteps$totalSteps, main="Histogram of step counts for the 61 days", 
+     xlab="Steps Taken During the Day", ylab="Frequency (days)")
+```
+
+The mean calculated for the daily sums is `r totStepsMean` and the median 
+is `r totStepsMed`.  This is skewed by a lot of data points with 
+low step counts, which happen to include the days where data was missing.
 
 ## What is the average daily activity pattern?
 
+We want to get an idea of the daily trend of activity averaged across all 
+days.  The first two lines below find the 5 minute interval index for the 
+interval where the average over days is maximum.  The plot, then, shows the 
+average step counts vs. interval index.
 
+```{r}
+rowInd <- which(intervalAveSteps$aveSteps==max(intervalAveSteps$aveSteps))
+maxStepInterval <- intervalAveSteps$interval[rowInd]
+plot(intervalAveSteps$interval, intervalAveSteps$aveSteps, type="l", 
+     main="Average Activity vs. 5-Minute Interval", 
+     xlab="5 Minute Interval Index", ylab="Average Activity (Steps)")
+```
+
+The interval index at which the average count is maximized is 
+`r maxStepInterval` (7:35-7:40 am). Activity appears to pick up after 
+interval 500, 
+which would correspond to 4 am, which suggests that this peak 
+corresponds to the person waking up and starting their day.
 
 ## Imputing missing values
 
+The previous analyses have treated the missing data, effectively, as if that 
+data had 0 steps taken in the intervals.  This led to there being a number 
+of days with a sum of 0 steps taken, which is entirely unrealistic and will 
+skew the data.  So, we may want to fill in this data with some *imputed* 
+values which are good "guesses" as to typical values that might have been 
+seen had valid data been collected. 
 
+```{r, echo=FALSE}
+numNAs <- sum(is.na(dfr$steps))
+```
+
+There are `r numNAs` data points (corresponding to 5 min intervals) where 
+the data is missing.  Observation reveals that these are for 8 particular 
+days, when data is missing.  (Perhaps the wearer did not wear their Fitbit 
+during those days.)
+
+I chose to use the 5 minute interval averages (across days) that the 
+previous graph shows to serve as those default values during particular 
+missing values.  In order to perform this imputation process, we create 
+a new dataframe that merges the original data with the average counts. 
+We then round these averages to the nearest integer, since step counts 
+should take on integer values.  Then, for all of the NA step values, we 
+copy over these new rounded values.  Finally, we sort the frame by date, 
+then interval, and we pull out the columns we want.
+
+```{r}
+dfr.imp <- merge(dfr, intervalAveSteps, by.x="interval", by.y="interval")
+dfr.imp <- mutate(dfr.imp, aveSteps=round(aveSteps))
+dfr.imp[is.na(dfr.imp$steps), ]$steps <- dfr.imp[is.na(dfr.imp$steps), ]$aveSteps
+dfr.imp <- arrange(dfr.imp, date, interval) %>% select(date, interval, steps)
+head(dfr.imp)
+tail(dfr.imp)
+```
+
+As can be seen, the step values at the start and end of the table, that were 
+originally NA, have now been filled in.
+
+Now, as before, we can take this data and calculate step sums for each day.
+
+```{r}
+daySteps.imp <- group_by(dfr.imp, date) %>% summarize(totalSteps=sum(steps))
+head(data.frame(daySteps.imp), 61)
+```
+
+Now we calculate a new mean and median and plot a new histogram with this 
+data.
+
+```{r}
+totStepsMean.imp <- mean(daySteps.imp$totalSteps)
+totStepsMed.imp <- median(daySteps.imp$totalSteps)
+hist(daySteps.imp$totalSteps, 
+     main="Histogram of step counts for the 61 days (imputed data)", 
+     xlab="Steps Taken During the Day", ylab="Frequency (days)")
+```
+
+The new mean calculated for the daily sums with the imputed data is 
+`r totStepsMean.imp` and the median is `r totStepsMed.imp`. The mean has 
+significantly increased and is now much closer to the median, which 
+indicates an "unskewing" of the distribution. 
+One of the first things to notice here is that 
+the histogram is far more symmetric, i.e., less skewed, than the previous 
+histogram that used the non-imputed missing data.  This illustrates the 
+benefit of missing data imputation: you arrive at more realistic values 
+that lead to more representative distributions.
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+In the previous line plot, we viewed the average step count vs. interval 
+index, with the data averaged over all days.  But what if we want to 
+compare the averages on the weekday vs. the weekend?
+
+First we calculate a new weekend variable to add to our (imputed) data. 
+Then, we perform a new aggregation by groups that include both interval 
+index and "weektime" (weekday vs. weekend), and we calculate averages for 
+each of the groups.
+
+```{r}
+isWeekend <- weekdays(as.Date(as.character(dfr.imp$date))) %in% c("Saturday", "Sunday")
+dfr.imp <- mutate(dfr.imp, weektime=factor(sapply(isWeekend, 
+    function(x) {if (x) "weekend" else "weekday"})))
+intervalWTAveSteps <- group_by(dfr.imp, interval, weektime) %>%
+    summarize(aveSteps=mean(steps))
+head(data.frame(intervalWTAveSteps))
+tail(data.frame(intervalWTAveSteps))
+```
+
+This data is organized in a way that is conducive to using ggplot to 
+make a panel plot.  We plot two panels (weekday vs. weekend) and, for each 
+of these, the average step count vs. the interval index.
+
+```{r}
+library(ggplot2)
+qplot(interval, aveSteps, data=intervalWTAveSteps, facets=. ~ weektime, 
+      geom=c("point", "line")) + 
+    labs(title="Average Activity (Weekday and Weekend) vs. 5-Minute Interval") +
+    labs(x="5 Minute Interval Index") + labs(y="Average Activity (Steps)")
+```
+
+Overall, there appears to be more (average) activity during certain parts 
+of the day during weekdays than on the weekends (for example between 
+intervals 500 and 1000). Since this corresponds to the time between 4 and 
+9 am, one likely hypothesis is that the wearer is sleeping in late during 
+the weekends.
